@@ -1,4 +1,15 @@
-﻿#include "ping.h"
+﻿/**
+ * @file ping.cpp
+ * @author DennisMi (https://www.dennisthink.com/)
+ * @brief ping功能的实现文件
+ * @version 0.1
+ * @date 2021-03-06
+ * 
+ * @copyright Copyright (c) 2021
+ * 
+ */
+
+#include "ping.h"
 #include <iostream>
 #include <winsock.h>
 #include "icmp_header.h"
@@ -32,6 +43,13 @@ namespace dennisthink
         }
         return param;
     }
+
+    /**
+     * @brief 创建发送ICMP使用的套接字
+     * 
+     * @return true 创建成功
+     * @return false 创建失败
+     */
     bool DtPing::CreateSocket()
     {
 
@@ -51,6 +69,13 @@ namespace dennisthink
         m_dstAddr.sin_family = AF_INET;
         return true;
     }
+
+    /**
+     * @brief 发送ICMP请求
+     * 
+     * @return true 发送成功
+     * @return false 发送失败
+     */
     bool DtPing::SendIcmpReq()
     {
         //创建ICMP请求回显报文
@@ -85,6 +110,13 @@ namespace dennisthink
         m_nSendCount++;
         return true;
     }
+
+    /**
+     * @brief 等待ICMP回复
+     * 
+     * @return true 有回复
+     * @return false 没有回复
+     */
     bool DtPing::waitForRecv()
     {
         //5S 等待套接字是否由数据
@@ -97,6 +129,13 @@ namespace dennisthink
         int nRet = select(1, &readfd, NULL, NULL, &timeOut);
         return (nRet != 0 && nRet != SOCKET_ERROR);
     }
+
+    /**
+     * @brief 接收ICMP回复
+     * 
+     * @return true 接收成功
+     * @return false 接收失败
+     */
     bool DtPing::RecvIcmpReply()
     {
         ICMP_Reply icmpReply; //接收应答报文
@@ -120,6 +159,12 @@ namespace dennisthink
         return true;
     }
 
+    /**
+     * @brief ICMP的回复转为ICMP的统计结果
+     * 
+     * @param elem ICMP回复
+     * @return IcmpRspElem ICMP回复结果
+     */
     IcmpRspElem DtPing::RspToResult(const ICMP_Reply &elem)
     {
         IcmpRspElem result;
@@ -129,6 +174,14 @@ namespace dennisthink
         result.m_nTime = GetTickCount()-elem.icmpanswer.timeStamp;
         return result;
     }
+    
+    /**
+     * @brief 计算校验和
+     * 
+     * @param pChar 数据
+     * @param len 数据长度
+     * @return uint16_t 校验和
+     */
     uint16_t DtPing::GetCheckSum(const void *pChar, const int len)
     {
         uint32_t checkSum = 0;
@@ -160,6 +213,12 @@ namespace dennisthink
         return (result);
     }
 
+    /**
+     * @brief 关闭套接字
+     * 
+     * @return true 关闭成功
+     * @return false 关闭失败
+     */
     bool DtPing::CloseSocket()
     {
         closesocket(m_socket);
@@ -184,6 +243,12 @@ namespace dennisthink
     {
     }
 
+    /**
+     * @brief 执行PING命令
+     * 
+     * @param strDstIp 目标IP
+     * @return int 
+     */
     int DtPing::doPing(const std::string strDstIp)
     {
         m_strDstIp = strDstIp;
@@ -222,6 +287,10 @@ namespace dennisthink
     
     }
 
+    /**
+     * @brief 清空统计结果
+     * 
+     */
     void DtPing::ClearStatistic()
     {
         m_nSendCount=0;
@@ -229,6 +298,10 @@ namespace dennisthink
         m_vec.clear();
     }
 
+    /**
+     * @brief 计算统计结果并输出
+     * 
+     */
     void DtPing::CalcStatisticAndPrint()
     {
         int nMin = 0;
