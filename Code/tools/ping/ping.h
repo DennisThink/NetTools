@@ -31,6 +31,8 @@ namespace dennisthink
         ~DtPing();
         int doPing(const std::string strDstIp);
     private:
+        void ClearStatistic();
+        void CalcStatisticAndPrint();
         bool CreateSocket();
         bool SendIcmpReq();
         bool waitForRecv();
@@ -44,6 +46,8 @@ namespace dennisthink
         struct sockaddr_in m_dstAddr;
         int m_nNum;
         std::vector<IcmpRspElem> m_vec;
+        int m_nSendCount;
+        int m_nRecvCount;
     };
 }
 #endif

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <winsock.h>
 #include "icmp_header.h"
+
 #pragma comment(lib, "ws2_32.lib")
 namespace dennisthink
 {
@@ -38,7 +39,10 @@ namespace dennisthink
         //TCP/IP协议族,RAW模式，ICMP协议
         //RAW创建的是一个原始套接字，最低可以访问到数据链路层的数据，也就是说在网络层的IP头的数据也可以拿到了。
         m_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-
+        if(INVALID_SOCKET == m_socket)
+        {
+            return false;
+        }
         //设置目标IP地址
         m_dstAddr.sin_addr.S_un.S_addr = inet_addr(m_strDstIp.c_str());
         //端口
@@ -63,7 +67,13 @@ namespace dennisthink
         //保存发送时间
         myIcmp.timeStamp = GetTickCount();
         //计算并且保存校验和
+        char chStart = 'a';
+        for (int i = 0; i < 32; i++)
+        {
+            myIcmp.data[i] = chStart + i % 26;
+        }
         myIcmp.icmphead.checkSum = GetCheckSum((void *)&myIcmp, static_cast<int>(sizeof(ICMP_Req)));
+
         //发送报文
         int Ret = sendto(m_socket, (char *)&myIcmp, sizeof(ICMP_Req), 0, (sockaddr *)&m_dstAddr, sizeof(sockaddr_in));
 
@@ -72,6 +82,7 @@ namespace dennisthink
             std::cerr << "socket send error:" << WSAGetLastError() << std::endl;
             return false;
         }
+        m_nSendCount++;
         return true;
     }
     bool DtPing::waitForRecv()
@@ -103,15 +114,19 @@ namespace dennisthink
         icmpReply.icmpanswer.icmphead.checkSum = 0;
         //重新计算
         IcmpRspElem result = RspToResult(icmpReply);
-        std::cout << "IP: " << result.m_strIp << " Bytes: " << result.m_nBytes << " TTL: " << result.m_nTTL << std::endl;
+        m_vec.push_back(result);
+        std::cout << "Response From " << result.m_strIp << " Bytes=" << result.m_nBytes << " time="<< result.m_nTime <<"ms TTL=" << result.m_nTTL << std::endl;
+        m_nRecvCount++;
         return true;
     }
+
     IcmpRspElem DtPing::RspToResult(const ICMP_Reply &elem)
     {
         IcmpRspElem result;
         result.m_strIp = inet_ntoa(m_srcAddr.sin_addr);
-        result.m_nBytes = elem.iphead.totalLength;
-        result.m_nTTL = -(elem.iphead.timetoLive);
+        result.m_nBytes = ntohs(elem.iphead.totalLength)-sizeof(IPhead)-sizeof(ICMP_head)-4;
+        result.m_nTTL = elem.iphead.timetoLive;
+        result.m_nTime = GetTickCount()-elem.icmpanswer.timeStamp;
         return result;
     }
     uint16_t DtPing::GetCheckSum(const void *pChar, const int len)
@@ -126,16 +141,23 @@ namespace dennisthink
         }
         if (size == 1)
         {
-            checkSum += *(uint8_t *)word;
+            checkSum += *(uint8_t *)word*256;
         }
+        //uint32_t temp = (checkSum >> 16) + (checkSum & 0xffff);
         //二进制反码求和运算，先取反在相加和先相加在取反的结果是一样的，所以先全部相加在取反
         //计算加上溢出后的结果
-        while (checkSum >> 16)
+        checkSum = (checkSum >> 16) + (checkSum & 0xffff);
+        /*if(checkSum > 0xffff)
         {
             checkSum = (checkSum >> 16) + (checkSum & 0xffff);
-        }
+        }*/
+
+
+        uint16_t result = checkSum;
+
+        result = ~result;
         //取反
-        return (~checkSum);
+        return (result);
     }
 
     bool DtPing::CloseSocket()
@@ -144,34 +166,7 @@ namespace dennisthink
         m_socket = -1;
         return true;
     }
-    uint16_t getCheckSum(void *protocol, char *type)
-    {
-        uint32_t checkSum = 0;
-        uint16_t *word = (uint16_t *)protocol;
-        uint32_t size = 0;
-        if (type == "ICMP")
-        { //计算有多少个字节
-            size = (sizeof(ICMP_Req));
-        }
-        while (size > 1) //用32位变量来存是因为要存储16位数相加可能发生的溢出情况，将溢出的最高位最后加到16位的最低位上
-        {
-            checkSum += *word++;
-            size -= 2;
-        }
-        if (size == 1)
-        {
-            checkSum += *(uint8_t *)word;
-        }
-        //二进制反码求和运算，先取反在相加和先相加在取反的结果是一样的，所以先全部相加在取反
-        //计算加上溢出后的结果
-        while (checkSum >> 16)
-        {
-            checkSum = (checkSum >> 16) + (checkSum & 0xffff);
-        }
-        //取反
-        return (~checkSum);
-    }
-
+   
     //捕获终止信号函数,专门处理无限ping时的操作
     void get_ctrl_stop(int signal)
     {
@@ -201,8 +196,10 @@ namespace dennisthink
         }
         if (!CreateSocket())
         {
+            std::cerr << "Create Socket failed Errno: "<<GetLastError()<<std::endl;
             goto ERR;
         }
+        ClearStatistic();
         for (int i = 0; i < 4; i++)
         {
             if (SendIcmpReq())
@@ -214,11 +211,52 @@ namespace dennisthink
                     }
                 }
             }
+            Sleep(1000);
         }
+        CalcStatisticAndPrint();
     //ping(strDstIp.c_str(), "-t");
     ERR:
         CloseSocket();
         WSACleanup();
         return 0;
+    
     }
+
+    void DtPing::ClearStatistic()
+    {
+        m_nSendCount=0;
+        m_nRecvCount=0;
+        m_vec.clear();
+    }
+
+    void DtPing::CalcStatisticAndPrint()
+    {
+        int nMin = 0;
+        int nMax = 0;
+        int nAverage = 0;
+        int nSum = 0;
+        if(!m_vec.empty())
+        {
+            nMin = nMax=m_vec[0].m_nTime;
+            for(const auto& item:m_vec)
+            {
+                if(nMax < item.m_nTime )
+                {
+                    nMax = item.m_nTime;
+                }
+
+                if(nMin > item.m_nTime)
+                {
+                    nMin = item.m_nTime;
+                }
+                nSum += item.m_nTime;
+            }
+            nAverage = nSum / m_vec.size();
+        }
+        std::cout<<m_strDstIp<<" 的Ping统计信息:"<<std::endl;
+        std::cout<<"   数据包: 已发送 = "<<m_nSendCount<<", 已接收 = "<<m_nRecvCount<<", 丢失 = "<< m_nSendCount-m_nRecvCount<<std::endl;
+        std::cout<<"往返行程的估计时间(以毫秒为单位):"<<std::endl;
+        std::cout<<"   最短 = "<<nMin<<"ms,最长 = "<<nMax<<"ms ,平均= "<<nAverage<<"ms"<<std::endl;
+    }
+
 }
